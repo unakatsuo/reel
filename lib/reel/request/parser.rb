@@ -1,3 +1,5 @@
+require 'puma'
+
 module Reel
   # Parses incoming HTTP requests
   class Request
@@ -5,30 +7,33 @@ module Reel
       attr_reader :headers
     
       def initialize
-        @parser = Http::Parser.new(self)
-        @headers = nil
+        @parser = Puma::HttpParser.new
+        @params = {}
         @read_body = false
+        @position = 0
       end
 
       def add(data)
-        @parser << data
+        @parser.execute @params, data, @position
+        @position += data.size
+        on_headers_complete(@params) if @parser.finished?
       end
       alias_method :<<, :add
 
       def headers?
-        !!@headers
+        !!@params
       end
     
       def http_method
-        @parser.http_method.downcase.to_sym
+        @params[Puma::Const::REQUEST_METHOD].downcase.to_sym
       end
     
       def http_version
-        @parser.http_version.join(".")
+        @params[Puma::Const::HTTP_VERSION][%r{^HTTP/(\d+.\d+)}, 1]
       end
     
       def url
-        @parser.request_url
+        @params[Puma::Const::REQUEST_URI]
       end
 
       #

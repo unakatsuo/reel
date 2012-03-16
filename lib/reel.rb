@@ -1,4 +1,3 @@
-require 'http/parser'
 require 'http'
 require 'celluloid/io'
 
