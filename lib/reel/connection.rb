@@ -28,6 +28,9 @@ module Reel
 
       reset_request
       @response_state = :headers
+      @on_check_continue = proc { |req|
+        respond(100)
+      }
     end
 
     # Is the connection still active?
@@ -58,7 +61,11 @@ module Reel
       @request_fsm.transition :headers
       @keepalive = false if req[CONNECTION] == CLOSE || req.version == HTTP_VERSION_1_0
       @current_request = req
-
+      # RFC 2616 8.2.3 Use of the 100 (Continue) Status
+      if req['Expect'] == '100-continue' && req.version == HTTP_VERSION_1_1
+        @on_check_continue.call(req)
+      end
+      
       req
     rescue IOError, Errno::ECONNRESET, Errno::EPIPE
       @request_fsm.transition :closed
@@ -91,12 +98,6 @@ module Reel
         body = headers_or_body
       end
 
-      if @keepalive
-        headers[CONNECTION] = KEEP_ALIVE
-      else
-        headers[CONNECTION] = CLOSE
-      end
-
       case response
       when Symbol, Fixnum, Integer
         response = Response.new(response, headers, body)
@@ -104,11 +105,23 @@ module Reel
       else raise TypeError, "invalid response: #{response.inspect}"
       end
 
+      if response.status != 100
+      if @keepalive
+        headers[CONNECTION] = KEEP_ALIVE
+      else
+        headers[CONNECTION] = CLOSE
+      end
+      end
+
       if current_request
         current_request.handle_response(response)
       else
         raise RequestError
       end
+
+      # Just respond status line and continue current response
+      # session for "Expect: 100-continue" request.
+      return if response.status == 100
 
       # Enable streaming mode
       if response.chunked? and response.body.nil?

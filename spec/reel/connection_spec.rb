@@ -73,6 +73,23 @@ describe Reel::Connection do
     end
   end
 
+  it "handles 'Expect: 100-continue' request" do
+    with_socket_pair do |client, peer|
+      connection = Reel::Connection.new(peer)
+      example_request = ExampleRequest.new
+      example_request['Expect']='100-continue'
+      client << example_request.to_s
+
+      connection.each_request do |request|
+        request.respond :ok
+        connection.close
+      end
+
+      response = client.read(4096)
+p      response
+    end    
+  end
+
   context "streams responses when transfer-encoding is chunked" do
     def test_chunked_response(request, client)
       # Sending transfer_encoding chunked without a body enables streaming mode
