@@ -73,21 +73,53 @@ describe Reel::Connection do
     end
   end
 
-  it "handles 'Expect: 100-continue' request" do
-    with_socket_pair do |client, peer|
-      connection = Reel::Connection.new(peer)
-      example_request = ExampleRequest.new
-      example_request['Expect']='100-continue'
-      client << example_request.to_s
+  context "Client requests with 'Expect: 100-continue'" do
+    CONTINUE_100_STATUS="HTTP/1.1 100 Continue\r\n\r\n".freeze
 
-      connection.each_request do |request|
-        request.respond :ok
-        connection.close
+    let(:example_request) {
+      ExampleRequest.new(:post).tap { |r|
+        r['Connection'] = 'close'
+        r['Expect']='100-continue'
+        r.body = File.read(fixture_path)
+      }
+    }
+
+    it "replies response from the default on_check_continue handler" do
+      with_socket_pair do |client, peer|
+        connection = Reel::Connection.new(peer)
+        client << example_request.to_s
+
+        connection.each_request do |request|
+          request.respond :ok
+          connection.close
+        end
+
+        response = client.read(4096)
+        response[0, CONTINUE_100_STATUS.length].should eq CONTINUE_100_STATUS
       end
+    end
 
-      response = client.read(4096)
-p      response
-    end    
+    it "replies custom response from on_check_continue handler" do
+      with_socket_pair do |client, peer|
+        connection = Reel::Connection.new(peer)
+
+        connection.on_check_continue do |req|
+          req.respond(404)
+        end
+        client << example_request.to_s
+
+        skip_request_processing = true
+        connection.each_request do |request|
+          request.respond :ok
+          connection.close
+          skip_request_processing = false
+        end
+
+        response = client.read(4096)
+        response.should eq "HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n"
+        skip_request_processing.should eq true
+      end
+    end
   end
 
   context "streams responses when transfer-encoding is chunked" do
