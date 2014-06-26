@@ -5,6 +5,7 @@ module Reel
     CONTENT_LENGTH     = 'Content-Length'.freeze
     TRANSFER_ENCODING  = 'Transfer-Encoding'.freeze
     CHUNKED            = 'chunked'.freeze
+    STATUS_LINE_ONLY_CODES = [100].freeze
 
     # Use status code tables from the HTTP gem
     STATUS_CODES          = HTTP::Response::Status::REASONS
@@ -66,5 +67,11 @@ module Reel
       "HTTP/1.1".freeze
     end
     private :http_version
+
+    # the response
+    def status_line_only?
+      # TODO: seems HTTP version check is required.
+      STATUS_LINE_ONLY_CODES.member?(@status)
+    end
   end
 end

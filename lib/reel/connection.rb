@@ -61,9 +61,14 @@ module Reel
       @request_fsm.transition :headers
       @keepalive = false if req[CONNECTION] == CLOSE || req.version == HTTP_VERSION_1_0
       @current_request = req
-      # RFC 2616 8.2.3 Use of the 100 (Continue) Status
+      # RFC 2616: 8.2.3 Use of the 100 (Continue) Status
       if req['Expect'] == '100-continue' && req.version == HTTP_VERSION_1_1
         @on_check_continue.call(req)
+        if @current_request.nil?
+          # the response has already been made in the callback so
+          # skip further request processing.
+          throw :skip
+        end
       end
       
       req
@@ -76,14 +81,16 @@ module Reel
     # Enumerate the requests from this connection, since we might receive
     # many if the client is using keep-alive
     def each_request
-      while req = request
-        yield req
+      catch(:skip) {
+        while req = request
+          yield req
 
-        # Websockets upgrade the connection to the Websocket protocol
-        # Once we have finished processing a Websocket, we can't handle
-        # additional requests
-        break if req.websocket?
-      end
+          # Websockets upgrade the connection to the Websocket protocol
+          # Once we have finished processing a Websocket, we can't handle
+          # additional requests
+          break if req.websocket?
+        end
+      }
     end
 
     # Send a response back to the client
@@ -105,12 +112,12 @@ module Reel
       else raise TypeError, "invalid response: #{response.inspect}"
       end
 
-      if response.status != 100
-      if @keepalive
-        headers[CONNECTION] = KEEP_ALIVE
-      else
-        headers[CONNECTION] = CLOSE
-      end
+      if !response.status_line_only?
+        if @keepalive
+          response.headers[CONNECTION] = KEEP_ALIVE
+        else
+          response.headers[CONNECTION] = CLOSE
+        end
       end
 
       if current_request
@@ -120,8 +127,8 @@ module Reel
       end
 
       # Just respond status line and continue current response
-      # session for "Expect: 100-continue" request.
-      return if response.status == 100
+      # session for the request contains "Expect: 100-continue".
+      return if response.status_line_only?
 
       # Enable streaming mode
       if response.chunked? and response.body.nil?
@@ -182,6 +189,12 @@ module Reel
         reset_request
       end
       @response_state = state
+    end
+
+    # Set the handler proc that replies an immediate response
+    # for "100-continue" request.
+    def on_check_continue(&blk)
+      @on_check_continue = blk
     end
   end
 end
